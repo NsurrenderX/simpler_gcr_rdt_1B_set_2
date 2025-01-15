@@ -461,13 +461,20 @@ def train(args, logger):
                 global_step += 1
 
                 if global_step % args.checkpointing_period == 0:
+                    accelerator.wait_for_everyone()
                     save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
                     accelerator.save_state(save_path)
+                    logger.info(f"Saved state to {save_path}")
+                    
                     ema_save_path = os.path.join(save_path, f"ema")
                     accelerator.save_model(ema_rdt, ema_save_path)
-                    logger.info(f"Saved state to {save_path}")
+                    logger.info(f"Saved ema to {ema_save_path}")
+                    
+                    accelerator.wait_for_everyone()
+                        
 
                 if args.sample_period > 0 and global_step % args.sample_period == 0:
+                    accelerator.wait_for_everyone()
                     sample_loss_for_log = log_sample_res(
                         text_encoder,
                         vision_encoder,
@@ -479,6 +486,8 @@ def train(args, logger):
                         sample_dataloader,
                         logger,
                     )
+                    accelerator.wait_for_everyone()
+                    print(global_step, sample_loss_for_log)
                     logger.info(sample_loss_for_log)
                     accelerator.log(sample_loss_for_log, step=global_step)
 
