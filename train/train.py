@@ -378,13 +378,13 @@ def train(args, logger):
             args.resume_from_checkpoint = None
         else:
             accelerator.print(f"Resuming from checkpoint {path}")
-            try:
-                accelerator.load_state(os.path.join(args.output_dir, path)) # load_module_strict=False
-            except:
-                # load deepspeed's state_dict
-                logger.info("Resuming training state failed. Attempting to only load from model checkpoint.")
-                checkpoint = torch.load(os.path.join(args.output_dir, path, "pytorch_model", "mp_rank_00_model_states.pt"))
-                rdt.module.load_state_dict(checkpoint["module"])
+            # try:
+            #     accelerator.load_state(os.path.join(args.output_dir, path)) # load_module_strict=False
+            # except:
+            #     # load deepspeed's state_dict
+            logger.info("Resuming training state failed. Attempting to only load from model checkpoint.")
+            checkpoint = torch.load(os.path.join(args.output_dir, path, "pytorch_model", "mp_rank_00_model_states.pt"))
+            rdt.module.load_state_dict(checkpoint["module"])
                 
             load_model(ema_rdt, os.path.join(args.output_dir, path, "ema", "model.safetensors"))
             global_step = int(path.split("-")[1])
