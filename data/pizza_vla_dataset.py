@@ -192,11 +192,11 @@ class HDF5VLADataset:
         # [Modify] The path to the HDF5 dataset directory
         # Each HDF5 file contains one episode
         HDF5_DIR = "/datahdd_8T/sep_pizza_builder/pizza_dataset/"
-        HDF5_META = "/home/v-wenhuitan/RDT/RoboticsDiffusionTransformer/data/pizza_robot/meta_view0.json"
+        HDF5_META = "/home/v-wenhuitan/RDT/simpler_gcr_rdt_1B_set_2/data/pizza_robot/meta_view0.json"
         self.emb_path = '/datahdd_8T/sep_pizza_builder/pizza_embedded/'
-        # HDF5_DIR = "/mnt/robotdata/datasets/pizza_robot/"
-        # HDF5_META = "/mnt/robotdata/datasets/pizza_robot/meta_view0.json"
-        # self.emb_path = '/mnt/robotdata/datasets/pizza_t5_embedded/'
+        HDF5_DIR = "/mnt/robotdata/datasets/pizza_robot/"
+        HDF5_META = "/mnt/robotdata/datasets/pizza_robot/meta_view0.json"
+        self.emb_path = '/mnt/robotdata/datasets/pizza_t5_embedded/'
         self.DATASET_NAME = "pizza_robot"
         
         
@@ -325,7 +325,7 @@ class HDF5VLADataset:
 
         # We randomly sample a timestep
         first_idx = chosen_task_ids[episode_id][0]
-        step_id = np.random.randint(first_idx+1, num_steps)
+        step_id = np.random.randint(first_idx, num_steps-1)
 
         # Load the instruction
         # emb_path = os.path.join(self.pizza_data.data_path, "..", "pizza_embedded")
@@ -340,50 +340,73 @@ class HDF5VLADataset:
 
         # [Not Used] Rescale gripper to [0, 1]
         # print(len(self.pizza_data.aligned_joints[str(task_id)][episode_id]))
-        joints = np.zeros((len(self.pizza_data.aligned_joints[str(task_id)][episode_id]), 7)).astype(np.float32)
-        for i, joint in enumerate(self.pizza_data.aligned_joints[str(task_id)][episode_id]):
-            joints[i] = joint[-1]
-        gripper = self.pizza_data.action_wo_gripper[str(task_id)][episode_id][:, 6:]
-        gripper_last = gripper[-1]
-        gripper = np.vstack((gripper, gripper_last))
+        pizza_action = self.pizza_data.action_wo_gripper[str(task_id)][episode_id]
+        
         # [Not Used] Rescale gripper to [0, 1]
-        for i in range(len(gripper)):
-            if gripper[i][0] <= 0.067:
-                gripper[i][0] = 0
+        for i in range(len(pizza_action)):
+            if pizza_action[i][-1] <= 0.067:
+                pizza_action[i][-1] = 0
             else:
-                gripper[i][0] = 1
-        qpos = np.hstack((joints, gripper))
+                pizza_action[i][-1] = 1
+            
+        def pizza_convert_to_6d_angle(action):
+            euler = action[3:6]
+            rot_mat = convert_euler_to_rotation_matrix(np.expand_dims(euler, axis=0))[0]
+            ortho6d = compute_ortho6d_from_rotation_matrix(np.expand_dims(rot_mat, axis=0))[0]
+            format_action = np.zeros(10).astype(np.float32)
+            format_action[0:3] = action[0:3]
+            format_action[3:9] = ortho6d
+            format_action[9] = action[6]
+            return format_action
+        
+        format_pizza_action = np.zeros((len(pizza_action), 10)).astype(np.float32)
+        for i in range(len(pizza_action)):
+            format_pizza_action[i] = pizza_convert_to_6d_angle(pizza_action[i])
+        qpos = format_pizza_action
+        
         state_norm = np.sqrt(np.mean(qpos**2, axis=0))
         qpos_ids = chosen_task_ids[episode_id]
         # Actual Chunk Size: 16
         CHUNK_SIZE = self.CHUNK_SIZE
-        ACTUAL_CHUNK_SIZE = 12
-        target_ids = qpos_ids[step_id - 1 : step_id + ACTUAL_CHUNK_SIZE]
-        target_qpos = np.zeros((self.CHUNK_SIZE + 1, 8)).astype(np.float32)
+        # ACTUAL_CHUNK_SIZE = 12
+        target_ids = qpos_ids[step_id  : step_id + CHUNK_SIZE]
+        if step_id + CHUNK_SIZE >= len(qpos_ids):
+            target_ids = target_ids[:-1]
+        target_qpos = np.zeros((self.CHUNK_SIZE, 10)).astype(np.float32)
         ACTUAL_LENGTH = 0
         for i in range(len(target_ids)):
             target_qpos[i] = qpos[target_ids[i]]
             ACTUAL_LENGTH += 1
-        ACTUAL_LENGTH -= 1
-        actions = target_qpos[1:]
+        actions = target_qpos
 
         # Parse the state and action
-        state = np.zeros((1, 8)).astype(np.float32)
-        state[0] = target_qpos[0]
+        originalstate = self.pizza_data.aligned_data[str(task_id)][episode_id]
+        states = np.zeros((len(qpos_ids)-1, 10)).astype(np.float32)
+        for i in range(len(qpos_ids)-1):
+            states[i] = pizza_convert_to_6d_angle(originalstate[qpos_ids[i]][-1])
+        state_std = np.std(states, axis=0)
+        state_mean = np.mean(states, axis=0)
+        # print("Origin state length: ", len(originstate))
+        originstate = pizza_convert_to_6d_angle(self.pizza_data.aligned_data[str(task_id)][episode_id][target_ids[0]][-1])
+        
+        state = np.zeros((1, 10)).astype(np.float32)
+        state[0] = originstate
 
-        zero_action = np.zeros(8).astype(np.float32)
+        zero_action = np.zeros(10).astype(np.float32)
         for i in range(8):
             zero_action[i] = 2*np.pi
 
         def padding_state(value, actual, expected):
-
-            if actual < expected:
-                if expected % actual == 0:
-                    # Repeative padding using the actual action chunk
-                    for i in range(1, expected // actual):
-                        value[i*actual:(i+1)*actual] = value[:actual]
+            # if actual < expected:
+            #     if expected % actual == 0:
+            #         # Repeative padding using the actual action chunk
+            #         for i in range(1, expected // actual):
+            #             value[i*actual:(i+1)*actual] = value[:actual]
                 # for i in range(1, expected - actual + 1):
                 #     value[-i] = zero_action
+            if actual < expected:
+                for i in range(1, expected - actual + 1 ):
+                    value[-i] = value[actual - 1]
             return value
         
         actions = padding_state(actions, ACTUAL_LENGTH, CHUNK_SIZE)
@@ -406,8 +429,9 @@ class HDF5VLADataset:
         
         state_indicator = fill_in_state(np.ones_like(state[0]))
         state = fill_in_state(state)
-        state_std = self.pizza_data.joints_std
-        state_mean = self.pizza_data.joints_mean
+
+        state_std[-1] = 1
+        state_mean[-1] = 0
         state_std = fill_in_state(state_std)
         state_norm = fill_in_state(state_norm)
         state_mean = fill_in_state(state_mean)
@@ -514,28 +538,38 @@ class HDF5VLADataset:
         if num_steps < 20:
             return False, None
 
-        # We randomly sample a timestep
-        first_idx = chosen_task_ids[episode_id][0]
-
-        joints = np.zeros((len(self.pizza_data.aligned_joints[str(task_id)][episode_id]), 7)).astype(np.float32)
-        for i, joint in enumerate(self.pizza_data.aligned_joints[str(task_id)][episode_id]):
-            joints[i] = joint[-1]
-        gripper = self.pizza_data.action_wo_gripper[str(task_id)][episode_id][:, 6:]
-        gripper_last = gripper[-1]
-        gripper = np.vstack((gripper, gripper_last))
+        pizza_action = self.pizza_data.action_wo_gripper[str(task_id)][episode_id]
+        
         # [Not Used] Rescale gripper to [0, 1]
-        for i in range(len(gripper)):
-            if gripper[i][0] <= 0.067:
-                gripper[i][0] = 0
+        for i in range(len(pizza_action)):
+            if pizza_action[i][-1] <= 0.067:
+                pizza_action[i][-1] = 0
             else:
-                gripper[i][0] = 1
-        qpos = np.hstack((joints, gripper))
-
-        state = np.zeros((len(chosen_task_ids[episode_id]), 8)).astype(np.float32)
-
-        for id in range(len(chosen_task_ids[episode_id])):
-            state[id] = qpos[chosen_task_ids[episode_id][id]]
-        actions = state[1:]
+                pizza_action[i][-1] = 1
+            
+        def pizza_convert_to_6d_angle(action):
+            euler = action[3:6]
+            rot_mat = convert_euler_to_rotation_matrix(np.expand_dims(euler, axis=0))[0]
+            ortho6d = compute_ortho6d_from_rotation_matrix(np.expand_dims(rot_mat, axis=0))[0]
+            format_action = np.zeros(10).astype(np.float32)
+            format_action[0:3] = action[0:3]
+            format_action[3:9] = ortho6d
+            format_action[9] = action[6]
+            return format_action
+        
+        format_pizza_action = np.zeros((len(pizza_action), 10)).astype(np.float32)
+        for i in range(len(pizza_action)):
+            format_pizza_action[i] = pizza_convert_to_6d_angle(pizza_action[i])
+        qpos_ids = chosen_task_ids[episode_id]
+        qpos = np.zeros((len(qpos_ids) - 1, 10)).astype(np.float32)
+        for i in range(len(qpos_ids) - 1):
+            qpos[i] = format_pizza_action[qpos_ids[i]]
+            
+        state = np.zeros((len(qpos_ids) - 1, 10)).astype(np.float32)
+        for i in range(len(qpos_ids) - 1):
+            originalstate = self.pizza_data.aligned_data[str(task_id)][episode_id][qpos_ids[i]][-1]
+            originalstate = pizza_convert_to_6d_angle(originalstate)
+            state[i] = originalstate
 
         def fill_in_state(values):
             # Target indices corresponding to your state space
@@ -553,66 +587,13 @@ class HDF5VLADataset:
             return uni_vec
 
         state = fill_in_state(state)
-        action = fill_in_state(actions)
+        action = fill_in_state(qpos)
 
         return True,{
             'state': state,
             'action': action
         }
         
-        # with h5py.File(file_path, 'r') as f:
-        #     qpos = f['observations']['qpos'][:]
-        #     num_steps = qpos.shape[0]
-        #     # [Optional] We drop too-short episode
-        #     if num_steps < 128:
-        #         return False, None
-            
-        #     # [Optional] We skip the first few still steps
-        #     EPS = 1e-2
-        #     # Get the idx of the first qpos whose delta exceeds the threshold
-        #     qpos_delta = np.abs(qpos - qpos[0:1])
-        #     indices = np.where(np.any(qpos_delta > EPS, axis=1))[0]
-        #     if len(indices) > 0:
-        #         first_idx = indices[0]
-        #     else:
-        #         raise ValueError("Found no qpos that exceeds the threshold.")
-            
-        #     # Rescale gripper to [0, 1]
-        #     qpos = qpos / np.array(
-        #        [[1, 1, 1, 1, 1, 1, 4.7908, 1, 1, 1, 1, 1, 1, 4.7888]] 
-        #     )
-        #     target_qpos = f['action'][:] / np.array(
-        #        [[1, 1, 1, 1, 1, 1, 11.8997, 1, 1, 1, 1, 1, 1, 13.9231]] 
-        #     )
-            
-        #     # Parse the state and action
-        #     state = qpos[first_idx-1:]
-        #     action = target_qpos[first_idx-1:]
-            
-        #     # Fill the state/action into the unified vector
-        #     def fill_in_state(values):
-        #         # Target indices corresponding to your state space
-        #         # In this example: 6 joints + 1 gripper for each arm
-        #         UNI_STATE_INDICES = [
-        #             STATE_VEC_IDX_MAPPING[f"left_arm_joint_{i}_pos"] for i in range(6)
-        #         ] + [
-        #             STATE_VEC_IDX_MAPPING["left_gripper_open"]
-        #         ] + [
-        #             STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(6)
-        #         ] + [
-        #             STATE_VEC_IDX_MAPPING["right_gripper_open"]
-        #         ]
-        #         uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,))
-        #         uni_vec[..., UNI_STATE_INDICES] = values
-        #         return uni_vec
-        #     state = fill_in_state(state)
-        #     action = fill_in_state(action)
-            
-        #     # Return the resulting sample
-        #     return True, {
-        #         "state": state,
-        #         "action": action
-        #     }
 
 if __name__ == "__main__":
     ds = HDF5VLADataset()
