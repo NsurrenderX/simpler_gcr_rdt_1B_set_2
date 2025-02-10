@@ -80,8 +80,8 @@ class pizzaSlice():
             view = "inhand_rgb"
         slices = {}
         for task in tqdm(range(1, 23)):
-            if task == 3 or task == 19 or task == 20:
-                continue
+            # if task == 3 or task == 19 or task == 20:
+            #     continue
             task_path = os.path.join(self.data_path,str(task))
             episodes = os.listdir(task_path)
             task_slice = {}
@@ -159,8 +159,8 @@ class pizzaSlice():
     def correct_img_indices(self):
         correct_indeces = {}
         for task in tqdm(range(1, 23)):
-            if task == 3 or task == 19 or task == 20:
-                continue
+            # if task == 3 or task == 19 or task == 20:
+            #     continue
             task_path = os.path.join(self.data_path,str(task))
             episodes = os.listdir(task_path)
             task_metainfo = self.slices[str(task)]
@@ -188,8 +188,8 @@ class pizzaSlice():
         datas = {}
         joints = {}
         for task in tqdm(range(1, 23)):
-            if task == 3 or task == 19 or task == 20:
-                continue
+            # if task == 3 or task == 19 or task == 20:
+            #     continue
             task_path = os.path.join(self.data_path,str(task))
             episodes = os.listdir(task_path)
             task_slice = {}
@@ -342,8 +342,8 @@ class pizzaSlice():
         abnormal_status = self.status_to_7dim(abnormal_status)
         for task in tqdm(range(1,23)):
             task_id = str(task)
-            if task == 3 or task == 19 or task == 20:
-                continue
+            # if task == 3 or task == 19 or task == 20:
+            #     continue
             task_path = os.path.join(self.data_path,str(task))
             episodes = os.listdir(task_path)
             task_act = {}
@@ -395,8 +395,8 @@ class pizzaSlice():
         action_mat = {}
         status_mat = {}
         for task in tqdm(range(1, 23)):
-            if task == 3 or task == 19 or task == 20:
-                continue
+            # if task == 3 or task == 19 or task == 20:
+            #     continue
             task_path = os.path.join(self.data_path,str(task))
             episodes = os.listdir(task_path)
             task_action = {}
@@ -610,8 +610,8 @@ class pizzaSlice():
             # # single task test
             # if task != 22:
             #     continue
-            if task == 3 or task == 19 or task == 20:
-                continue
+            # if task == 3 or task == 19 or task == 20:
+            #     continue
             task_id = str(task)
             task_path = os.path.join(self.data_path,str(task))
             episodes = os.listdir(task_path)
@@ -817,6 +817,18 @@ if __name__ == "__main__":
     aligned_joints1 = pizza1.aligned_joints
     prompts1 = pizza1.prompts
     chosen_ids1 = pizza1.chosen_ids
+    
+    # # Save meta data to json file
+    # with open(meta_save, 'w') as f:
+    #     to_dump = {
+    #         'slices': slice1,
+    #         'aligned_data': aligned_data1,
+    #         'aligned_joints': aligned_joints1,
+    #         'prompts': prompts1,
+    #         'chosen_ids': chosen_ids1
+    #     }
+    #     json.dump(to_dump, f, cls=ndarrayEncoder)
+    # print("Meta data saved to json file")
     
     pizza2 = pizzaSlice(data_path='/datahdd_8T/sep_pizza_builder/pizza_dataset/', meta_path='meta_view0.json')
     slice2 = pizza2.slices
