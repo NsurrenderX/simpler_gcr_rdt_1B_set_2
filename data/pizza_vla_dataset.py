@@ -8,8 +8,63 @@ import cv2
 import numpy as np
 
 # from configs.state_vec import STATE_VEC_IDX_MAPPING
+from scipy.spatial.transform import Rotation as R
 from data.pizza_robot import pizza_data_class as pdc
 # from pizza_robot import pizza_data_class as pdc
+
+def convert_euler_to_rotation_matrix(euler):
+    """
+    Convert Euler angles (rpy) to rotation matrix (3x3).
+    """
+    quat = R.from_euler('xyz', euler).as_matrix()
+    
+    return quat
+
+def compute_ortho6d_from_rotation_matrix(matrix):
+    # The ortho6d represents the first two column vectors a1 and a2 of the
+    # rotation matrix: [ | , |,  | ]
+    #                  [ a1, a2, a3]
+    #                  [ | , |,  | ]
+    ortho6d = matrix[:, :, :2].transpose(0, 2, 1).reshape(matrix.shape[0], -1)
+    return ortho6d
+
+def compute_rotation_matrix_from_ortho6d(ortho6d):
+    x_raw = ortho6d[:, 0:3]
+    y_raw = ortho6d[:, 3:6]
+        
+    x = normalize_vector(x_raw)
+    z = cross_product(x, y_raw)
+    z = normalize_vector(z)
+    y = cross_product(z, x)
+    
+    x = x.reshape(-1, 3, 1)
+    y = y.reshape(-1, 3, 1)
+    z = z.reshape(-1, 3, 1)
+    matrix = np.concatenate((x, y, z), axis=2)
+    return matrix
+
+def convert_rotation_matrix_to_euler(rotmat):
+    """
+    Convert rotation matrix (3x3) to Euler angles (rpy).
+    """
+    r = R.from_matrix(rotmat)
+    euler = r.as_euler('xyz', degrees=False)
+    
+    return euler
+
+def normalize_vector(v):
+    v_mag = np.linalg.norm(v, axis=-1, keepdims=True)
+    v_mag = np.maximum(v_mag, 1e-8)
+    return v / v_mag
+
+
+def cross_product(u, v):
+    i = u[:,1]*v[:,2] - u[:,2]*v[:,1]
+    j = u[:,2]*v[:,0] - u[:,0]*v[:,2]
+    k = u[:,0]*v[:,1] - u[:,1]*v[:,0]
+        
+    out = np.stack((i, j, k), axis=1)
+    return out
 
 STATE_VEC_IDX_MAPPING = {
     # [0, 10): right arm joint positions
@@ -249,8 +304,8 @@ class HDF5VLADataset:
         if file_path is None:
             task_list = np.arange(1, 23)
             task_id = np.random.choice(task_list)
-            while task_id == 3 or task_id == 19 or task_id == 20:
-                task_id = np.random.choice(task_list)
+            # while task_id == 3 or task_id == 19 or task_id == 20:
+            #     task_id = np.random.choice(task_list)
             chosen_task_ids = self.chosen_ids[str(task_id)]
 
             episode_list = np.asanyarray(list(chosen_task_ids.keys()))
@@ -265,7 +320,7 @@ class HDF5VLADataset:
         num_steps = len(chosen_task_ids[episode_id])
 
         # [Optional] We drop too-short episode
-        if num_steps < 24:
+        if num_steps < 20:
             return False, None
 
         # We randomly sample a timestep
@@ -336,12 +391,15 @@ class HDF5VLADataset:
         # Fill the state/action into the unified vector
         def fill_in_state(values):
             # Target indices corresponding to your state space
-            # In our data: 7 joints + 1 gripper for franka arm
-            UNI_STATE_INDICES = [
-                STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(7)
-            ] + [
-                STATE_VEC_IDX_MAPPING["right_gripper_open"]
-            ]
+            # In our data: 3 translation, 6 rotation, 1 gripper
+            UNI_STATE_INDICES = [ STATE_VEC_IDX_MAPPING['eef_pos_x']
+                            ] + [ STATE_VEC_IDX_MAPPING['eef_pos_y']
+                            ] + [ STATE_VEC_IDX_MAPPING['eef_pos_z']
+                    ] + [
+                        STATE_VEC_IDX_MAPPING[f"eef_angle_{i}"] for i in range(6)
+                    ] + [
+                        STATE_VEC_IDX_MAPPING["right_gripper_open"]
+                    ]
             uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,))
             uni_vec[..., UNI_STATE_INDICES] = values
             return uni_vec
@@ -437,8 +495,8 @@ class HDF5VLADataset:
         if file_path is None:
             task_list = np.arange(1, 23)
             task_id = np.random.choice(task_list)
-            while task_id == 3 or task_id == 19 or task_id == 20:
-                task_id = np.random.choice(task_list)
+            # while task_id == 3 or task_id == 19 or task_id == 20:
+            #     task_id = np.random.choice(task_list)
             chosen_task_ids = self.chosen_ids[str(task_id)]
 
             episode_list = np.asanyarray(list(chosen_task_ids.keys()))
@@ -453,7 +511,7 @@ class HDF5VLADataset:
         num_steps = len(chosen_task_ids[episode_id])
 
         # [Optional] We drop too-short episode
-        if num_steps < 24:
+        if num_steps < 20:
             return False, None
 
         # We randomly sample a timestep
@@ -481,12 +539,15 @@ class HDF5VLADataset:
 
         def fill_in_state(values):
             # Target indices corresponding to your state space
-            # In our data: 7 joints + 1 gripper for franka arm
-            UNI_STATE_INDICES = [
-                STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(7)
-            ] + [
-                STATE_VEC_IDX_MAPPING["right_gripper_open"]
-            ]
+            # In our data: 3 translation, 6 rotation, 1 gripper for franka arm
+            UNI_STATE_INDICES = [ STATE_VEC_IDX_MAPPING['eef_pos_x']
+                            ] + [ STATE_VEC_IDX_MAPPING['eef_pos_y']
+                            ] + [ STATE_VEC_IDX_MAPPING['eef_pos_z']
+                    ] + [
+                        STATE_VEC_IDX_MAPPING[f"eef_angle_{i}"] for i in range(6)
+                    ] + [
+                        STATE_VEC_IDX_MAPPING["right_gripper_open"]
+                    ]
             uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,))
             uni_vec[..., UNI_STATE_INDICES] = values
             return uni_vec
