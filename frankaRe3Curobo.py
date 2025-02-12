@@ -153,10 +153,10 @@ class frankaRe3:
             current_state = 1
         else:
             current_state = -1
-        if gripper_width > 0:
-            gripper = -1
-        else:
+        if gripper_width > 0.01:
             gripper = 1
+        else:
+            gripper = -1
         if current_state * gripper == -1:
             if current_state == 1:
                 print("Closing gripper")

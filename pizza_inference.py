@@ -147,22 +147,28 @@ def decode_b64_image(b64image):
 
 def extract_state(action_chunk):
     action_chunk = action_chunk.to(dtype = torch.float32).detach().cpu().numpy()[0]
-    UNI_STATE_INDICES = [
-        STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(7)
-    ] + [
-        STATE_VEC_IDX_MAPPING["right_gripper_open"]
-    ]
+    UNI_STATE_INDICES = [ STATE_VEC_IDX_MAPPING['eef_pos_x']
+                            ] + [ STATE_VEC_IDX_MAPPING['eef_pos_y']
+                            ] + [ STATE_VEC_IDX_MAPPING['eef_pos_z']
+                            ] + [
+                                STATE_VEC_IDX_MAPPING[f"eef_angle_{i}"] for i in range(6)
+                            ] + [
+                                STATE_VEC_IDX_MAPPING["right_gripper_open"]
+                            ]
     uni_vec = action_chunk[ : , UNI_STATE_INDICES]
     return uni_vec.tolist()
 
 def fill_in_state(values):
     # Target indices corresponding to your state space
     # In our data: 7 joints + 1 gripper for franka arm
-    UNI_STATE_INDICES = [
-        STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(7)
-    ] + [
-        STATE_VEC_IDX_MAPPING["right_gripper_open"]
-    ]
+    UNI_STATE_INDICES = [ STATE_VEC_IDX_MAPPING['eef_pos_x']
+                            ] + [ STATE_VEC_IDX_MAPPING['eef_pos_y']
+                            ] + [ STATE_VEC_IDX_MAPPING['eef_pos_z']
+                            ] + [
+                                STATE_VEC_IDX_MAPPING[f"eef_angle_{i}"] for i in range(6)
+                            ] + [
+                                STATE_VEC_IDX_MAPPING["right_gripper_open"]
+                            ]
     uni_vec = np.zeros(values.shape[:-1] + (STATE_VEC_LEN,))
     uni_vec[..., UNI_STATE_INDICES] = values
     return uni_vec
@@ -188,7 +194,8 @@ def pizza_in_datastream(instance_data: dict):
     """
         instance_data: dict
             {
-                'joints': list history*7
+                'action': list history*9
+                'state': list history*9
                 'gripper': float history*1
                 'image'
                 'task_id'    
@@ -204,23 +211,20 @@ def pizza_in_datastream(instance_data: dict):
     img_history_size = 2
     num_cameras = 3
 
-    history = len(instance_data['joints'])
-    history_gripper = len(instance_data['gripper'])
-    assert history == history_gripper , "joint length and gripper length should be the same"
-    dof = len(instance_data['joints'][0])
-    joint = np.zeros((history, dof)).astype(np.float32)
+    dof = len(instance_data['state'][0])
+    history = len(instance_data['action'])
+    actions = np.zeros((history, dof)).astype(np.float32)
+    state = np.zeros((history, dof)).astype(np.float32)
     for idx in range(history):
-        joint[idx] = instance_data['joints'][-(history-idx)]
-    gripper = np.array(instance_data['gripper']).astype(np.float32)
-    gripper = np.expand_dims(gripper, axis=1)
-    print(joint.shape, gripper.shape)
-    qpos = np.hstack((joint, gripper))
-    state_norm = np.sqrt(np.mean(qpos**2, axis=0))
-    state = qpos[-1]
+        actions[idx] = instance_data['action'][-(history-idx)]
+        state[idx] = instance_data['state'][-(history-idx)]
+
+    state_norm = np.sqrt(np.mean(state**2, axis=0))
+    state = state[-1]
     state_indicator = fill_in_state(np.ones_like(state[0]))
     state = fill_in_state(state)
     state_norm = fill_in_state(state_norm)
-    actions = state.copy()
+    actions = fill_in_state(actions[-1].copy())
     state = np.expand_dims(state, axis=0)
     def unavailable_img():
         return np.zeros((img_history_size, 0, 0, 0))
@@ -587,14 +591,14 @@ def predict():
 if __name__ == "__main__":
     device = 'cuda:0'
     pretrained_vision_encoder_name_or_path = "/datahdd_8T/vla_pizza/RDT_module_params/siglip-so400m-patch14-384/"
-    pretrained_model_name_or_path = "/datahdd_8T/vla_pizza/rdt_checkpoint/170M_test_16chunk/checkpoint-100/"
+    pretrained_model_name_or_path = "/datahdd_8T/vla_pizza/rdt_checkpoint/0211_1B_ac16/checkpoint-270000/"
 
     print("Loading Model from: ", pretrained_model_name_or_path)
     print("Loading vision encoder from: ", pretrained_vision_encoder_name_or_path)
     vision_encoder = SiglipVisionTower(vision_tower=pretrained_vision_encoder_name_or_path, args=None).to(device=device, dtype=torch.bfloat16)
     image_processor = vision_encoder.image_processor
     rdt = RDTRunner.from_pretrained(pretrained_model_name_or_path)
-    rdt.reconfig_horizon(16)
+    # rdt.reconfig_horizon(16)
     rdt = rdt.to(device=device, dtype=torch.bfloat16)
     # for param in rdt.lang_adaptor.parameters():
     #     print(param.dtype)
